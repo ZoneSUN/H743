@@ -1,0 +1,26 @@
+# Keil / IAR build products (keep .sct linker scripts and project sources)
+*.o
+*.obj
+*.d
+*.crf
+*.axf
+*.hex
+*.map
+*.lst
+*.lnp
+*.dep
+*.build_log.htm
+KeilCode/MDK-ARM/YS-H7Multi/*.htm
+KeilCode/MDK-ARM/build_log.txt
+KeilCode/EWARM/**/Exe/
+KeilCode/EWARM/**/Obj/
+KeilCode/EWARM/**/List/
+
+# Per-user IDE layout and debug configuration
+*.uvguix.*
+*.uvgui.*
+.vscode/
+DebugConfig/
+*.ewd
+*.tmp
+*.bak

@@ -1,0 +1,13 @@
+---
+description: STM32H743 + Keil MDK 工程约定（路线 A）
+alwaysApply: true
+---
+
+# STM32H743 Keil 工程约定
+
+- 芯片：STM32H743VITx；驱动风格：STM32 HAL（`USE_HAL_DRIVER` / `STM32H743xx`）。
+- 应用代码放 `Src/`，板级驱动放 `Bsp/`，头文件对应 `Inc/` 与 `Bsp/Inc/`。
+- 编译、下载、调试以 Keil MDK 为准（工程：`MDK-ARM/YS-H7Multi.uvprojx`）。不要擅自引入 CMake/GCC 工程或 OpenOCD 调试链。
+- 修改外设初始化或中断时，同步检查 `Src/stm32h7xx_it.c` 与 `Src/stm32h7xx_hal_msp.c`。
+- 优先改业务与 BSP；除非明确要求，不要大范围改动 `Drivers/` 下的 HAL/CMSIS 源码。
+- 源文件多为 GBK/GB2312 中文注释；新增注释尽量与现有文件编码一致。

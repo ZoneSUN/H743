@@ -1,141 +1,169 @@
-/**
- * @file bsp_IICx_demo.c
- * @brief 通用 HAL 阻塞访问实现；不定义全局 HAL_I2C_MspInit，避免影响其他总线。
- * 源自原 myiic.c 的硬件 I2C2 实现，现将句柄和状态移入各自总线对象。
- * Copyright (c) 2020-2032, MZXQ. Porting changes maintained in this project.
+/** @file bsp_IICx_demo.c
+ * @brief CubeMX 风格的 I2C1/I2C2 初始化和 GPIO/时钟 MSP 配置。
+ *
+ * I2C1 使用 PB8/PB9（AF4），I2C2 使用 PH4/PH5（AF4）。两组引脚均为
+ * 复用开漏，GPIO 不启用内部上拉，通信波形依赖板级外部上拉和线路负载。
+ * I2C1/I2C2 共用 I2C123 内核时钟选择域，因此 MSP 配置使用同一来源；
+ * 修改任一总线的时钟选择时必须同时审查另一条总线的 TIMING 配置。
  */
 #include "bsp_IICx_demo.h"
 
-/* 每次操作覆盖最近状态，软件参数错误清除旧 HAL 错误，避免误报历史错误。 */
-/** 将最近操作状态保存在当前总线对象中，不影响其他总线。
- * error 是 HAL 错误位或 NONE；软件参数错误使用 NONE 清除旧错误。 */
-static HAL_StatusTypeDef record(bsp_i2c_bus_t *bus, HAL_StatusTypeDef status, uint32_t error)
+I2C_HandleTypeDef hi2c1;
+I2C_HandleTypeDef hi2c2;
+
+/* 本工程未统一提供 CubeMX Error_Handler；外设、滤波或时钟配置失败时停机，
+ * 防止上层把未完成初始化的句柄当作可用总线继续访问。这里是软件停机，
+ * 并不代表已经完成任何实际硬件通信测试。 */
+static void bsp_i2c_init_error(void)
 {
-    if (bus != NULL) { bus->last_status = status; bus->last_error = error; }
-    return status;
+    __disable_irq();
+    while (1) { }
 }
-/** 传输前统一检查对象、7 位器件地址、初始化标志和当前时钟。
- * 时钟失效时清除初始化状态，调用者需要恢复时钟并重新初始化。 */
-static HAL_StatusTypeDef check_bus(bsp_i2c_bus_t *bus, uint16_t address)
+
+/**
+ * @brief 通用I2C主机初始化，共用一份参数设置代码。
+ * @param handle 每条总线自己的HAL句柄，例如&hi2c1或&hi2c2。
+ * @param instance 对应硬件外设I2C1或I2C2，必须与传入句柄匹配。
+ * @param timing TIMINGR值，由bsp_i2c按实际内核时钟及线路条件指定。
+ * @note 调用前完成HAL及系统时钟初始化；失败按原方式停机。
+ *       MSP根据Instance选择GPIO和外设时钟，不探测或访问EEPROM。
+ * 输入参数：
+ *   handle：I2C句柄指针，必须指向有效的I2C_HandleTypeDef结构体。
+ *   instance：I2C外设实例指针，例如I2C1或I2C2。
+ *   timing：TIMINGR寄存器值，按实际内核时钟和线路条件计算。
+ * 输出参数：无。
+ * 调用关系：bsp_i2c_init()间接调用。   
+ */
+void MX_I2C_Init(I2C_HandleTypeDef *handle, I2C_TypeDef *instance, uint32_t timing)
 {
-    if (bus == NULL || bus->config == NULL || address > 0x7FU)
-        return record(bus, HAL_ERROR, HAL_I2C_ERROR_NONE);
-    if (!bus->initialized)
-        return record(bus, HAL_ERROR, HAL_I2C_ERROR_NONE);
-    if (!bus->config->clock_valid()) {
-        bus->initialized = 0U;
-        bus->init_status = HAL_ERROR;
-        return record(bus, HAL_ERROR, HAL_I2C_ERROR_NONE);
+    /* USER CODE BEGIN I2C_Init 0 */
+    /* USER CODE END I2C_Init 0 */
+    handle->Instance = instance;
+    handle->Init.Timing = timing;
+    /* OwnAddress是MCU自身从机地址，不是EEPROM的0x50。 */
+    handle->Init.OwnAddress1 = 0U;
+    handle->Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+    handle->Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+    handle->Init.OwnAddress2 = 0U;
+    handle->Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+    handle->Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+    handle->Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+    /* 句柄首次初始化时，HAL通过MSP完成所选实例的时钟和GPIO配置。 */
+    if (HAL_I2C_Init(handle) != HAL_OK)
+    {
+        bsp_i2c_init_error();
     }
-    return HAL_OK;
-}
-/** 按总线配置调用板级准备回调，再设置 HAL 句柄和滤波。
- * bus 必须长期有效；成功置 initialized=1，失败保存 init_status。
- * 已初始化且时钟正确时复用现有配置；不检查任何器件是否应答。 */
-HAL_StatusTypeDef bsp_i2c_init(bsp_i2c_bus_t *bus)
-{
-    HAL_StatusTypeDef status;
-    if (bus == NULL) return HAL_ERROR;
-    if (bus->config == NULL || bus->config->instance == NULL ||
-        bus->config->prepare == NULL || bus->config->clock_valid == NULL ||
-        bus->config->digital_filter > 15U ||
-        (bus->config->analog_filter != I2C_ANALOGFILTER_ENABLE &&
-         bus->config->analog_filter != I2C_ANALOGFILTER_DISABLE)) {
-        bus->initialized = 0U; bus->init_status = HAL_ERROR;
-        return record(bus, HAL_ERROR, HAL_I2C_ERROR_NONE);
+    /* 模拟滤波开启；数字滤波为0，不增加额外数字滤波采样。 */
+    if (HAL_I2CEx_ConfigAnalogFilter(handle, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+    {
+        bsp_i2c_init_error();
     }
-    if (bus->initialized && bus->config->clock_valid()) {
-        bus->init_status = HAL_OK;
-        return record(bus, HAL_OK, HAL_I2C_ERROR_NONE);
+    if (HAL_I2CEx_ConfigDigitalFilter(handle, 0U) != HAL_OK)
+    {
+        bsp_i2c_init_error();
     }
-    /* 准备失败时保持不可传输状态，防止调用者沿用部分初始化的外设。 */
-    bus->initialized = 0U;
-    status = bus->config->prepare();
-    if (status != HAL_OK || !bus->config->clock_valid()) {
-        bus->init_status = (status == HAL_OK) ? HAL_ERROR : status;
-        return record(bus, bus->init_status, HAL_I2C_ERROR_NONE);
+    /* USER CODE BEGIN I2C_Init 2 */
+    /* USER CODE END I2C_Init 2 */
+}
+
+/**
+ * @brief 公共SCL/SDA引脚配置，端口、引脚和复用功能由MSP分支传入。
+ * @note 调用前开启对应GPIO时钟；开漏高电平由板上外部上拉提供。
+ * 输入参数：
+ *   port：GPIO端口，例如GPIOB或GPIOH。
+ *   pins：GPIO引脚掩码，例如GPIO_PIN_8|GPIO_PIN_9。
+ *   alternate：GPIO复用功能，例如GPIO_AF4_I2C1或GPIO_AF4_I2C2。
+ * 输出参数：无。
+ * 调用关系：由HAL_I2C_MspInit间接调用。
+ */
+static void I2C_GPIO_Init(GPIO_TypeDef *port, uint32_t pins, uint32_t alternate)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    GPIO_InitStruct.Pin = pins;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = alternate;
+    HAL_GPIO_Init(port, &GPIO_InitStruct);
+}
+
+/**
+ * @brief HAL首次初始化时调用，准备I2C1/I2C2的时钟和GPIO。
+ * @note 共享时钟配置集中写一次，每次回调仍会执行；
+ *       分支只保留各自时钟使能及GPIO参数。不处理其他I2C实例。
+ * 输入参数：
+ *   i2cHandle：待初始化的I2C句柄，必须指向有效的I2C_HandleTypeDef结构体。
+ * 输出参数：无。
+ * 调用关系：由HAL_I2C_Init间接调用。
+ */
+void HAL_I2C_MspInit(I2C_HandleTypeDef *i2cHandle)
+{
+    RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+    if (i2cHandle == NULL ||
+        (i2cHandle->Instance != I2C1 && i2cHandle->Instance != I2C2))
+    {
+        return;
     }
-    bus->handle.Instance = bus->config->instance;
-    bus->handle.Init.Timing = bus->config->timing;
-    /* 本模块作为 7 位地址主机访问器件，不配置双地址或通用广播响应。
-     * OwnAddress 是 MCU 自身的从机地址，不是 EEPROM 的 0x50 地址。 */
-    bus->handle.Init.OwnAddress1 = 0U;
-    bus->handle.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-    bus->handle.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-    bus->handle.Init.OwnAddress2 = 0U;
-    bus->handle.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
-    bus->handle.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-    bus->handle.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-    /* 按顺序初始化外设和滤波；前一步失败就跳过后续配置。 */
-    status = HAL_I2C_Init(&bus->handle);
-    if (status == HAL_OK)
-        status = HAL_I2CEx_ConfigAnalogFilter(&bus->handle, bus->config->analog_filter);
-    if (status == HAL_OK)
-        status = HAL_I2CEx_ConfigDigitalFilter(&bus->handle, bus->config->digital_filter);
-    bus->init_status = status;
-    bus->initialized = (status == HAL_OK) ? 1U : 0U;
-    return record(bus, status, HAL_I2C_GetError(&bus->handle));
+    /* USER CODE BEGIN I2C_MspInit 0 */
+    /* USER CODE END I2C_MspInit 0 */
+    /* 两条总线共用I2C123时钟源；与bsp_i2c传入的100MHz时序约定一致。 */
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2C123;
+    PeriphClkInitStruct.I2c123ClockSelection = RCC_I2C123CLKSOURCE_D2PCLK1;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+        bsp_i2c_init_error();
+    }
+
+    if (i2cHandle->Instance == I2C1)
+    {
+        /* USER CODE BEGIN I2C1_MspInit 0 */
+        /* USER CODE END I2C1_MspInit 0 */
+        __HAL_RCC_GPIOB_CLK_ENABLE();
+        __HAL_RCC_I2C1_CLK_ENABLE();
+        /* PB8=SCL、PB9=SDA，AF4复用。 */
+        I2C_GPIO_Init(GPIOB, GPIO_PIN_8 | GPIO_PIN_9, GPIO_AF4_I2C1);
+        /* USER CODE BEGIN I2C1_MspInit 1 */
+        /* USER CODE END I2C1_MspInit 1 */
+    }
+    else if (i2cHandle->Instance == I2C2)
+    {
+        /* USER CODE BEGIN I2C2_MspInit 0 */
+        /* USER CODE END I2C2_MspInit 0 */
+        __HAL_RCC_GPIOH_CLK_ENABLE();
+        __HAL_RCC_I2C2_CLK_ENABLE();
+        /* PH4=SCL、PH5=SDA，AF4复用，当前板载24C02使用。 */
+        I2C_GPIO_Init(GPIOH, GPIO_PIN_4 | GPIO_PIN_5, GPIO_AF4_I2C2);
+        /* USER CODE BEGIN I2C2_MspInit 1 */
+        /* USER CODE END I2C2_MspInit 1 */
+    }
 }
-/* 统一校验存储地址长度；8 位地址不允许静默截断为低 8 位。 */
-/** memory 是器件内部地址，size 是 HAL 的 8BIT/16BIT 地址宽度常量。
- * 8 位模式拒绝超过 0xFF 的地址，避免 HAL 静默截断。 */
-static uint8_t memory_valid(uint16_t memory, uint16_t size)
+
+/*反初始化I2C总线，释放GPIO和时钟。*/
+/* 用途：释放指定 I2C 实例的 GPIO 和外设时钟。
+ * 输入：待反初始化的 HAL 句柄；NULL 直接返回。输出：无。
+ * 调用关系：由 HAL_I2C_DeInit 间接调用。 */
+void HAL_I2C_MspDeInit(I2C_HandleTypeDef *i2cHandle)
 {
-    return (size == I2C_MEMADD_SIZE_16BIT) ||
-        (size == I2C_MEMADD_SIZE_8BIT && memory <= 0xFFU);
+    /* HAL_I2C_DeInit 的反向回调；只关闭目标实例时钟并释放其 GPIO。 */
+    if (i2cHandle == NULL) { return; }
+    if (i2cHandle->Instance == I2C1)
+    {
+        /* USER CODE BEGIN I2C1_MspDeInit 0 */
+        /* USER CODE END I2C1_MspDeInit 0 */
+        __HAL_RCC_I2C1_CLK_DISABLE();
+        HAL_GPIO_DeInit(GPIOB, GPIO_PIN_8 | GPIO_PIN_9);
+        /* USER CODE BEGIN I2C1_MspDeInit 1 */
+        /* USER CODE END I2C1_MspDeInit 1 */
+    }
+    else if (i2cHandle->Instance == I2C2)
+    {
+        /* USER CODE BEGIN I2C2_MspDeInit 0 */
+        /* USER CODE END I2C2_MspDeInit 0 */
+        __HAL_RCC_I2C2_CLK_DISABLE();
+        HAL_GPIO_DeInit(GPIOH, GPIO_PIN_4 | GPIO_PIN_5);
+        /* USER CODE BEGIN I2C2_MspDeInit 1 */
+        /* USER CODE END I2C2_MspDeInit 1 */
+    }
 }
-/** address 为未左移 7 位器件地址，memory 为内部地址，length 为字节数。
- * timeout_ms 单位为毫秒；阻塞到完成或出错，返回 HAL 状态并记录错误码。
- * 零长度只校验不传输；非零读取失败可能部分修改 data。 */
-HAL_StatusTypeDef bsp_i2c_mem_read(bsp_i2c_bus_t *bus, uint16_t address,
-    uint16_t memory, uint16_t memory_size, uint8_t *data, uint16_t length, uint32_t timeout_ms)
-{
-    HAL_StatusTypeDef status;
-    if (check_bus(bus, address) != HAL_OK) return HAL_ERROR;
-    if (!memory_valid(memory, memory_size) || (data == NULL && length != 0U))
-        return record(bus, HAL_ERROR, HAL_I2C_ERROR_NONE);
-    if (length == 0U) return record(bus, HAL_OK, HAL_I2C_ERROR_NONE);
-    /* 地址左移只在 HAL 边界进行，调用者始终传 0x50 而不是 0xA0。 */
-    status = HAL_I2C_Mem_Read(&bus->handle, (uint16_t)(address << 1), memory,
-        memory_size, data, length, timeout_ms);
-    return record(bus, status, HAL_I2C_GetError(&bus->handle));
-}
-/** 参数含义同读取接口，data 是只读发送缓冲区。
- * 仅完成总线传输，不负责 EEPROM 的页边界和写周期等待。
- * 返回 HAL 状态；HAL 发送接口缺少 const，转换仅用于调用旧 HAL。 */
-HAL_StatusTypeDef bsp_i2c_mem_write(bsp_i2c_bus_t *bus, uint16_t address,
-    uint16_t memory, uint16_t memory_size, const uint8_t *data, uint16_t length, uint32_t timeout_ms)
-{
-    HAL_StatusTypeDef status;
-    if (check_bus(bus, address) != HAL_OK) return HAL_ERROR;
-    if (!memory_valid(memory, memory_size) || (data == NULL && length != 0U))
-        return record(bus, HAL_ERROR, HAL_I2C_ERROR_NONE);
-    if (length == 0U) return record(bus, HAL_OK, HAL_I2C_ERROR_NONE);
-    /* HAL 老版本接口未加 const，HAL 发送过程不会修改该缓冲区。 */
-    status = HAL_I2C_Mem_Write(&bus->handle, (uint16_t)(address << 1), memory,
-        memory_size, (uint8_t *)data, length, timeout_ms);
-    return record(bus, status, HAL_I2C_GetError(&bus->handle));
-}
-/** 探测 address 是否 ACK，trials 为 HAL 重试次数且不能为 0。
- * timeout_ms 为毫秒；此函数不读写存储内容，返回值不保证器件写入正确。 */
-HAL_StatusTypeDef bsp_i2c_is_device_ready(bsp_i2c_bus_t *bus, uint16_t address,
-    uint32_t trials, uint32_t timeout_ms)
-{
-    HAL_StatusTypeDef status;
-    if (check_bus(bus, address) != HAL_OK) return HAL_ERROR;
-    if (trials == 0U) return record(bus, HAL_ERROR, HAL_I2C_ERROR_NONE);
-    status = HAL_I2C_IsDeviceReady(&bus->handle, (uint16_t)(address << 1), trials, timeout_ms);
-    return record(bus, status, HAL_I2C_GetError(&bus->handle));
-}
-/** 返回最近初始化结果；bus=NULL 返回 HAL_ERROR。
- * 未初始化对象的 init_status 应按板级示例设为 HAL_ERROR。 */
-HAL_StatusTypeDef bsp_i2c_get_init_status(const bsp_i2c_bus_t *bus)
-{ return bus == NULL ? HAL_ERROR : bus->init_status; }
-/** 返回当前总线最近一次底层操作结果，bus=NULL 返回 HAL_ERROR。
- * 上层参数检查未调用总线时，此值不会刷新。 */
-HAL_StatusTypeDef bsp_i2c_get_last_status(const bsp_i2c_bus_t *bus)
-{ return bus == NULL ? HAL_ERROR : bus->last_status; }
-/** 返回最近底层 HAL 错误位，bus=NULL 返回 NONE。
- * 必须结合状态判断，NONE 不表示上层 EEPROM 操作一定成功。 */
-uint32_t bsp_i2c_get_last_error(const bsp_i2c_bus_t *bus)
-{ return bus == NULL ? HAL_I2C_ERROR_NONE : bus->last_error; }

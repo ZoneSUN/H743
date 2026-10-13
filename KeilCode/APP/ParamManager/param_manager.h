@@ -8,6 +8,7 @@
  */
 #ifndef PARAM_MANAGER_H
 #define PARAM_MANAGER_H
+/* 保存/加载接口依赖24C02声明及其提供的整数类型，不能省略此引用。 */
 #include "at24c02.h"
 
 /* 每个参数占 4 字节，宏值是 EEPROM 内部的绝对起始地址，不是器件地址。

@@ -71,8 +71,8 @@ int main(void)
   /* 0x20是内部存储地址；写入含结尾NUL的10字节。
    * 读取9个字符，最后一字节保持0；只在读写都成功后打印实际读回数据。
    * 每次启动覆盖测试区，验证掉电保存时移除write调用。 */
-  //at24c02_write(AT24C02_TEST_ADDRESS, text, sizeof(text));					                                         //字符写入测试
-  //at24c02_read(AT24C02_TEST_ADDRESS, readback, sizeof(readback));		                                         //字符读取测试
+  at24c02_write(AT24C02_TEST_ADDRESS, text, sizeof(text));					                                         //字符写入测试
+  at24c02_read(AT24C02_TEST_ADDRESS, readback, sizeof(readback));		                                         //字符读取测试
 	//at24c02_write(PARAM_PID_KP_ADDR,  (const uint8_t *)&PARAM_PID_DEFAULTS.kp, sizeof(PARAM_PID_DEFAULT_KP));  //float写入测试
   param_manager_save_pid(&PARAM_PID_DEFAULTS);  
   param_manager_load_pid(&pid_read);                                                              //pid整体读取测试

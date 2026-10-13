@@ -21,23 +21,52 @@ static void bsp_i2c_init_error(void)
 }
 
 /**
+ * @brief 公共SCL/SDA引脚配置，端口、引脚和复用功能由板级启动函数传入。
+ * @note 调用前开启对应GPIO时钟；开漏高电平由板上外部上拉提供。
+ * 输入参数：
+ *   port：GPIO端口，例如GPIOB或GPIOH。
+ *   pins：GPIO引脚掩码，例如GPIO_PIN_8|GPIO_PIN_9。
+ *   alternate：GPIO复用功能，例如GPIO_AF4_I2C1或GPIO_AF4_I2C2。
+ * 输出参数：无。
+ * 调用关系：由MX_I2C_Init调用。
+ */
+static void I2C_GPIO_Init(GPIO_TypeDef *port, uint32_t pins, uint32_t alternate)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    GPIO_InitStruct.Pin = pins;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = alternate;
+    HAL_GPIO_Init(port, &GPIO_InitStruct);
+}
+
+/**
  * @brief 通用I2C主机初始化，共用一份参数设置代码。
  * @param handle 每条总线自己的HAL句柄，例如&hi2c1或&hi2c2。
  * @param instance 对应硬件外设I2C1或I2C2，必须与传入句柄匹配。
  * @param timing TIMINGR值，由bsp_i2c按实际内核时钟及线路条件指定。
- * @note 调用前完成HAL及系统时钟初始化；失败按原方式停机。
- *       MSP根据Instance选择GPIO和外设时钟，不探测或访问EEPROM。
+ * @note 调用前完成HAL及系统时钟初始化，并由启动函数开启GPIO/I2C外设时钟；
+ *       初始化失败按原方式停机。
+ *       本函数直接按输入配置GPIO，MSP仅选择I2C时钟，不访问EEPROM。
+ * @param port GPIO端口，调用前需开启其时钟。
+ * @param pins SCL/SDA引脚掩码，两根线需位于同一端口。
+ * @param alternate 对应引脚的I2C复用功能。
  * 输入参数：
  *   handle：I2C句柄指针，必须指向有效的I2C_HandleTypeDef结构体。
  *   instance：I2C外设实例指针，例如I2C1或I2C2。
  *   timing：TIMINGR寄存器值，按实际内核时钟和线路条件计算。
  * 输出参数：无。
- * 调用关系：bsp_i2c_init()间接调用。   
+ * 调用关系：bsp_I2C1_Start或bsp_I2C2_Start调用。
  */
-void MX_I2C_Init(I2C_HandleTypeDef *handle, I2C_TypeDef *instance, uint32_t timing)
+void MX_I2C_Init(I2C_HandleTypeDef *handle, I2C_TypeDef *instance, uint32_t timing,
+                 GPIO_TypeDef *port, uint32_t pins, uint32_t alternate)
 {
     /* USER CODE BEGIN I2C_Init 0 */
     /* USER CODE END I2C_Init 0 */
+    /* 启动函数已开启GPIO时钟，直接按传入参数配置SCL/SDA。 */
+    I2C_GPIO_Init(port, pins, alternate);
     handle->Instance = instance;
     handle->Init.Timing = timing;
     /* OwnAddress是MCU自身从机地址，不是EEPROM的0x50。 */
@@ -48,7 +77,7 @@ void MX_I2C_Init(I2C_HandleTypeDef *handle, I2C_TypeDef *instance, uint32_t timi
     handle->Init.OwnAddress2Masks = I2C_OA2_NOMASK;
     handle->Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
     handle->Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-    /* 句柄首次初始化时，HAL通过MSP完成所选实例的时钟和GPIO配置。 */
+    /* 句柄首次初始化时，HAL通过MSP完成所选实例的共享内核时钟源配置。 */
     if (HAL_I2C_Init(handle) != HAL_OK)
     {
         bsp_i2c_init_error();
@@ -67,31 +96,9 @@ void MX_I2C_Init(I2C_HandleTypeDef *handle, I2C_TypeDef *instance, uint32_t timi
 }
 
 /**
- * @brief 公共SCL/SDA引脚配置，端口、引脚和复用功能由MSP分支传入。
- * @note 调用前开启对应GPIO时钟；开漏高电平由板上外部上拉提供。
- * 输入参数：
- *   port：GPIO端口，例如GPIOB或GPIOH。
- *   pins：GPIO引脚掩码，例如GPIO_PIN_8|GPIO_PIN_9。
- *   alternate：GPIO复用功能，例如GPIO_AF4_I2C1或GPIO_AF4_I2C2。
- * 输出参数：无。
- * 调用关系：由HAL_I2C_MspInit间接调用。
- */
-static void I2C_GPIO_Init(GPIO_TypeDef *port, uint32_t pins, uint32_t alternate)
-{
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    GPIO_InitStruct.Pin = pins;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-    GPIO_InitStruct.Alternate = alternate;
-    HAL_GPIO_Init(port, &GPIO_InitStruct);
-}
-
-/**
- * @brief HAL首次初始化时调用，准备I2C1/I2C2的时钟和GPIO。
+ * @brief HAL首次初始化时调用，只准备I2C1/I2C2的时钟。
  * @note 共享时钟配置集中写一次，每次回调仍会执行；
- *       分支只保留各自时钟使能及GPIO参数。不处理其他I2C实例。
+ *       GPIO和I2C外设时钟使能已移至启动函数，此处只配置共享时钟源。
  * 输入参数：
  *   i2cHandle：待初始化的I2C句柄，必须指向有效的I2C_HandleTypeDef结构体。
  * 输出参数：无。
@@ -116,28 +123,7 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef *i2cHandle)
         bsp_i2c_init_error();
     }
 
-    if (i2cHandle->Instance == I2C1)
-    {
-        /* USER CODE BEGIN I2C1_MspInit 0 */
-        /* USER CODE END I2C1_MspInit 0 */
-        __HAL_RCC_GPIOB_CLK_ENABLE();
-        __HAL_RCC_I2C1_CLK_ENABLE();
-        /* PB8=SCL、PB9=SDA，AF4复用。 */
-        I2C_GPIO_Init(GPIOB, GPIO_PIN_8 | GPIO_PIN_9, GPIO_AF4_I2C1);
-        /* USER CODE BEGIN I2C1_MspInit 1 */
-        /* USER CODE END I2C1_MspInit 1 */
-    }
-    else if (i2cHandle->Instance == I2C2)
-    {
-        /* USER CODE BEGIN I2C2_MspInit 0 */
-        /* USER CODE END I2C2_MspInit 0 */
-        __HAL_RCC_GPIOH_CLK_ENABLE();
-        __HAL_RCC_I2C2_CLK_ENABLE();
-        /* PH4=SCL、PH5=SDA，AF4复用，当前板载24C02使用。 */
-        I2C_GPIO_Init(GPIOH, GPIO_PIN_4 | GPIO_PIN_5, GPIO_AF4_I2C2);
-        /* USER CODE BEGIN I2C2_MspInit 1 */
-        /* USER CODE END I2C2_MspInit 1 */
-    }
+
 }
 
 /*反初始化I2C总线，释放GPIO和时钟。*/

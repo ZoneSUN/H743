@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32H743xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;..\Bsp\Inc;..\Bsp\bsp_USARTx_demo;..\Bsp\bsp_USART2_485;..\Bsp\System_Init;..\Bsp\bsp_UART7_485;..\Bsp\bsp_USART1_485;..\Bsp\bsp_UART4_485;..\Bsp\bsp_DO;..\Bsp\bsp_CANFDx_demo;..\Bsp\bsp_CAN1;..\Bsp\bsp_CAN2;..\Bsp\I2C;..\Bsp\EEPROM;..\APP\ParamManager;..\Bsp\bsp_IICx_demo;..\APP\DeviceData;..\APP\DeviceProcess;..\APP\DeviceProcess\BRT38Encoder</IncludePath>
+              <IncludePath>../Inc;../Drivers/STM32H7xx_HAL_Driver/Inc;../Drivers/STM32H7xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32H7xx/Include;../Drivers/CMSIS/Include;..\Bsp\Inc;..\Bsp\bsp_USARTx_demo;..\Bsp\bsp_USART2_485;..\Bsp\System_Init;..\Bsp\bsp_UART7_485;..\Bsp\bsp_USART1_485;..\Bsp\bsp_UART4_485;..\Bsp\bsp_DO;..\Bsp\bsp_CANFDx_demo;..\Bsp\bsp_CAN1;..\Bsp\bsp_CAN2;..\Bsp\I2C;..\Bsp\EEPROM;..\APP\ParamManager;..\Bsp\bsp_IICx_demo;..\APP\DeviceData;..\APP\DeviceProcess;..\APP\DeviceProcess\BRT38Encoder;..\Bsp\bsp_TIMx_demo;..\APP\TimerTask</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -1046,6 +1046,26 @@
               <FileName>param_manager.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\APP\ParamManager\param_manager.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>bsp_TIMx_demo</GroupName>
+          <Files>
+            <File>
+              <FileName>bsp_TIMx.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Bsp\bsp_TIMx_demo\bsp_TIMx.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>TimerTask</GroupName>
+          <Files>
+            <File>
+              <FileName>timer_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\APP\TimerTask\timer_task.c</FilePath>
             </File>
           </Files>
         </Group>

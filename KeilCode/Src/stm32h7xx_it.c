@@ -36,6 +36,7 @@
 #include "stm32h7xx_it.h"
 #include "bsp_CAN.h"
 #include "BRT38Encoder_Process.h"
+#include "bsp_TIMx.h"
 
 /* USER CODE BEGIN 0 */
 
@@ -196,5 +197,28 @@ void SysTick_Handler(void)
 
 /* USER CODE BEGIN 1 */
 
+/** @brief TIM1更新中断，仅选中TIM1时交给HAL处理。 */
+void TIM1_UP_IRQHandler(void)
+{
+  if (tim_task_handle.Instance == TIM1) { HAL_TIM_IRQHandler(&tim_task_handle); }
+}
+
+/** @brief TIM2更新中断，仅选中TIM2时交给HAL处理。 */
+void TIM2_IRQHandler(void)
+{
+  if (tim_task_handle.Instance == TIM2) { HAL_TIM_IRQHandler(&tim_task_handle); }
+}
+
+/** @brief TIM6与DAC共享中断，仅选中TIM6时交给HAL处理；启用DAC时需扩展此入口。 */
+void TIM6_DAC_IRQHandler(void)
+{
+  if (tim_task_handle.Instance == TIM6) { HAL_TIM_IRQHandler(&tim_task_handle); }
+}
+
+/** @brief TIM7更新中断，仅选中TIM7时交给HAL处理。 */
+void TIM7_IRQHandler(void)
+{
+  if (tim_task_handle.Instance == TIM7) { HAL_TIM_IRQHandler(&tim_task_handle); }
+}
 /* USER CODE END 1 */
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

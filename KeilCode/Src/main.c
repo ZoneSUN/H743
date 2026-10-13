@@ -27,6 +27,9 @@
 #include "param_manager.h"
 
 
+#include "timer_task.h" /* 周期中断通知与主循环任务。 */
+#include "bsp_TIMx.h" /* BSP周期定时器启动接口。 */
+
 /* 函数体 --------------------------------------------------------------------*/
 
 /**
@@ -40,6 +43,7 @@
 	
 int main(void)
 {
+  uint32_t can_last_tick;
 //测试定义参数
   const uint8_t text[] = "123123";
   uint8_t readback[sizeof(text)] = {0};
@@ -105,6 +109,11 @@ int main(void)
 
   BRT38_Job_BindDefault();
 
+  /* TIM1每1000ms通知一次；当前GROUP_4子优先级为0。 */
+  printf("TIMx_Start=%u\r\n",
+         (unsigned int)TIMx_Start(TIM1, 1000000U, 6U, 0U));
+  can_last_tick = HAL_GetTick() - 1000U;
+
   printf("__LINE__: %d\r\n", __LINE__);
 
 	/* 无限循环 */
@@ -118,9 +127,15 @@ int main(void)
 		*/
     /* CAN1_Send 接口未实现，暂时禁用 */
     // CAN1_Send(0x112U, 0x112U, 0x112U, 0x112U);
-    CAN2_Send(0x112U, 0x112U, 0x112U, 0x112U);
+    Timer_Task_Run(); /* 处理定时通知，打印放在主循环而非ISR。 */
+    /* 保持CAN每秒发送一次，避免1秒阻塞延时推迟任务处理。 */
+    if ((uint32_t)(HAL_GetTick() - can_last_tick) >= 1000U)
+    {
+        can_last_tick = HAL_GetTick();
+        CAN2_Send(0x112U, 0x112U, 0x112U, 0x112U);
+    }
     //DO_Step();
-    HAL_Delay(1000);
+    HAL_Delay(1U);
   }
 
 }
